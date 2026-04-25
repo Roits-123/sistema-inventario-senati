@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>INVENTARIO | SENATI</title>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        :root { --bg: #0b0e11; --card: #15191d; --neon: #00f2ff; --text: #ffffff; --border: #2d3439; }
+        body { background: var(--bg); color: var(--text); font-family: sans-serif; margin: 0; display: flex; height: 100vh; }
+        .sidebar { width: 300px; background: var(--card); border-right: 1px solid var(--border); padding: 30px; display: flex; flex-direction: column; }
+        .main { flex: 1; padding: 40px; overflow-y: auto; }
+        .btn-neon { background: var(--neon); color: black; border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; }
+        .dash { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 25px; }
+        .card { background: var(--card); padding: 15px; border-radius: 10px; border: 1px solid var(--border); }
+        .card span { display: block; color: #888; font-size: 11px; text-transform: uppercase; }
+        .card div { font-size: 22px; font-weight: bold; margin-top: 5px; }
+        table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 10px; overflow: hidden; }
+        th, td { padding: 15px; border-bottom: 1px solid var(--border); text-align: left; }
+        .id-badge { background: #1e262c; color: var(--neon); padding: 4px 8px; border-radius: 4px; font-weight: bold; }
+        .modal { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.8); display: none; justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background: var(--card); padding: 30px; border-radius: 12px; width: 350px; border: 1px solid var(--border); }
+        input { width: 100%; background: #0b0e11; border: 1px solid var(--border); padding: 12px; color: white; margin: 10px 0; border-radius: 6px; box-sizing: border-box; outline: none; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>SISTEMA ACADÉMICO</h2>
+        <h1>Control de Ingreso</h1>
+        <button class="btn-neon" onclick="abrirNuevo()">+ PROCESAR REGISTRO</button>
+    </div>
+    <div class="main">
+        <div class="dash">
+            <div class="card"><span style="color:var(--neon)">Ingresos Totales</span><div id="stat-v">S/ 0.00</div></div>
+            <div class="card"><span style="color:#ff4d4f">Sin Stock</span><div id="stat-s">0</div></div>
+            <div class="card"><span style="color:#ffa940">Bajo Stock (≤ 5)</span><div id="stat-b">0</div></div>
+        </div>
+        <h2>Registro Detallado de Inventario</h2>
+        <table>
+            <thead><tr><th>ID</th><th>Producto</th><th>Precio</th><th>Stock</th><th>Acciones</th></tr></thead>
+            <tbody id="tabla"></tbody>
+        </table>
+    </div>
+
+    <div class="modal" id="modal">
+        <div class="modal-content">
+            <h2 id="m-titulo" style="color:var(--neon)">Nuevo Registro</h2>
+            <input type="hidden" id="m-id">
+            <input type="text" id="m-nombre" placeholder="Nombre">
+            <input type="number" id="m-precio" placeholder="Precio">
+            <input type="number" id="m-stock" placeholder="Stock">
+            <button class="btn-neon" onclick="guardar()">GRABAR CAMBIOS</button>
+            <button onclick="cerrarModal()" style="background:none; border:none; color:#888; width:100%; margin-top:10px; cursor:pointer;">Cancelar</button>
+        </div>
+    </div>
+
+    <script>
+        let totalCash = 0; 
+        let editando = false;
+
+        async function cargar() {
+            try {
+                const res = await fetch('/productos');
+                const data = await res.json();
+                let sStock = 0; let bStock = 0;
+
+                document.getElementById('tabla').innerHTML = data.map(p => {
+                    if(p.stock == 0) sStock++; else if(p.stock <= 5) bStock++;
+                    return `<tr>
+                        <td><span class="id-badge">ID-${p.id.toString().padStart(4, '0')}</span></td>
+                        <td style="color:var(--neon); font-weight:bold">${p.nombre}</td>
+                        <td>S/ ${parseFloat(p.precio).toFixed(2)}</td>
+                        <td style="color: ${p.stock == 0 ? '#ff4d4f' : (p.stock <= 5 ? '#ffa940' : '#00ff88')}">${p.stock} UN</td>
+                        <td>
+                            <button onclick="comprar(${p.id})" style="background:none; border:1px solid var(--neon); color:var(--neon); cursor:pointer; padding:5px 8px; border-radius:4px">🛒</button>
+                            <button onclick='abrirEditar(${JSON.stringify(p)})' style="background:none; border:1px solid #888; color:#888; cursor:pointer; padding:5px 8px; border-radius:4px">✏️</button>
+                            <button onclick="eliminar(${p.id})" style="background:none; border:1px solid #ff4d4f; color:#ff4d4f; cursor:pointer; padding:5px 8px; border-radius:4px">🗑️</button>
+                        </td>
+                    </tr>`;
+                }).join('');
+                document.getElementById('stat-v').innerText = 'S/ ' + totalCash.toFixed(2);
+                document.getElementById('stat-s').innerText = sStock;
+                document.getElementById('stat-b').innerText = bStock;
+            } catch(e) { console.error(e); }
+        }
+
+        async function comprar(id) {
+            const res = await fetch('/comprar', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id}) });
+            const data = await res.json();
+            if(res.ok) { 
+                totalCash += parseFloat(data.precio); 
+                Swal.fire({icon:'success', title:data.msg, showConfirmButton:false, timer:800, background:'#15191d', color:'#fff'}); 
+                cargar(); 
+            } else { 
+                Swal.fire({icon:'error', title:'Error', text:data.msg, background:'#15191d', color:'#fff'}); 
+            }
+        }
+
+        async function eliminar(id) {
+            const res = await Swal.fire({ title: '¿Eliminar?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#ff4d4f', background: '#15191d', color: '#fff' });
+            if (res.isConfirmed) { 
+                await fetch('/productos/'+id, { method: 'DELETE' }); 
+                cargar(); 
+            }
+        }
+
+        function abrirNuevo() { 
+            editando = false; 
+            document.getElementById('m-id').value = '';
+            document.getElementById('m-nombre').value = '';
+            document.getElementById('m-precio').value = '';
+            document.getElementById('m-stock').value = '';
+            document.getElementById('m-titulo').innerText = 'Nuevo Registro';
+            document.getElementById('modal').style.display = 'flex'; 
+        }
+
+        function abrirEditar(p) { 
+            editando = true; 
+            document.getElementById('m-id').value = p.id;
+            document.getElementById('m-nombre').value = p.nombre;
+            document.getElementById('m-precio').value = p.precio;
+            document.getElementById('m-stock').value = p.stock;
+            document.getElementById('m-titulo').innerText = 'Editar Registro';
+            document.getElementById('modal').style.display = 'flex'; 
+        }
+
+        function cerrarModal() { document.getElementById('modal').style.display = 'none'; }
+
+        async function guardar() {
+            const id = document.getElementById('m-id').value;
+            const n = document.getElementById('m-nombre').value;
+            const p = document.getElementById('m-precio').value;
+            const s = document.getElementById('m-stock').value;
+
+            if(!n || !p || !s) return Swal.fire({icon:'error', title:'Faltan datos', background:'#15191d', color:'#fff'});
+
+            const url = editando ? '/productos/' + id : '/productos';
+            const method = editando ? 'PUT' : 'POST';
+
+            try {
+                const res = await fetch(url, {
+                    method: method,
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ nombre: n, precio: p, stock: s })
+                });
+                if(res.ok) {
+                    cerrarModal();
+                    cargar();
+                    Swal.fire({icon:'success', title:'Guardado', showConfirmButton:false, timer:1000, background:'#15191d', color:'#fff'});
+                }
+            } catch(e) { console.error(e); }
+        }
+        cargar();
+    </script>
+</body>
+</html>
